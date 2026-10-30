@@ -4,8 +4,8 @@ from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="Akuarimba SIC Dashboard", page_icon="🐟", layout="wide")
 
-# Auto-refresh halaman setiap 2 detik
-st_autorefresh(interval=2000, limit=None, key="mosquitto_refresh")
+# Auto-refresh halaman setiap 2 detik agar dashboard selalu terbarui
+st_autorefresh(interval=2000, limit=None, key="dashboard_refresh")
 
 # Inisialisasi Session State
 for key in ['ph', 'temp', 'turbid', 'sonar', 'light']:
@@ -32,19 +32,17 @@ def get_mqtt_client():
             elif "light" in topic:
                 st.session_state.light = payload
         except Exception as e:
-            print("Error:", e)
+            print("Error parsing MQTT:", e)
 
-    # Menggunakan WebSocket agar lolos firewall Streamlit Cloud
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, transport="websockets")
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     client.on_connect = on_connect
     client.on_message = on_message
     
     try:
-        # Menggunakan broker Mosquitto via port WebSocket (8080)
-        client.connect("test.mosquitto.org", 8080, 60)
+        client.connect("broker.hivemq.com", 1883, 60)
         client.loop_start()
     except Exception as e:
-        print("Connection failed:", e)
+        print("MQTT Connection failed:", e)
         
     return client
 
@@ -65,4 +63,4 @@ col4.metric("Cahaya", f"{st.session_state.light} Lux")
 col5.metric("Sonar / Jarak", f"{st.session_state.sonar} cm")
 
 st.markdown("---")
-st.info("💡 Terhubung ke test.mosquitto.org via WebSocket.")
+st.info("💡 Terhubung ke broker.hivemq.com. Data diperbarui secara real-time dari Wokwi.")
