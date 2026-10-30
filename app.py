@@ -4,7 +4,7 @@ from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="Akuarimba SIC Dashboard", page_icon="🐟", layout="wide")
 
-# Auto-refresh halaman setiap 2 detik agar angka live langsung tampil
+# Auto-refresh halaman setiap 2 detik
 st_autorefresh(interval=2000, limit=None, key="mqtt_refresh")
 
 # Inisialisasi Session State
@@ -12,32 +12,40 @@ for key in ['ph', 'temp', 'turbid', 'sonar', 'light']:
     if key not in st.session_state:
         st.session_state[key] = "Menunggu..."
 
-# Callback MQTT saat pesan masuk dari Wokwi
+# Callback saat pesan MQTT diterima
 def on_message(client, userdata, msg):
-    payload = msg.payload.decode()
-    topic = msg.topic
-    if "ph" in topic:
-        st.session_state.ph = payload
-    elif "temp" in topic:
-        st.session_state.temp = payload
-    elif "turbid" in topic:
-        st.session_state.turbid = payload
-    elif "sonar" in topic:
-        st.session_state.sonar = payload
-    elif "light" in topic:
-        st.session_state.light = payload
+    try:
+        payload = msg.payload.decode('utf-8')
+        topic = msg.topic
+        if "ph" in topic:
+            st.session_state.ph = payload
+        elif "temp" in topic:
+            st.session_state.temp = payload
+        elif "turbid" in topic:
+            st.session_state.turbid = payload
+        elif "sonar" in topic:
+            st.session_state.sonar = payload
+        elif "light" in topic:
+            st.session_state.light = payload
+    except Exception as e:
+        print("Error parsing MQTT message:", e)
 
-# Inisialisasi Koneksi MQTT (Singleton)
+# Fungsi Inisialisasi MQTT dengan API Version 2 (Terbaru & Stabil)
 @st.cache_resource
-def start_mqtt():
-    client = mqtt.Client()
-    client.on_message = on_message
-    client.connect("broker.hivemq.com", 1883, 60)
-    client.subscribe("akuarimba/sensor/#")
-    client.loop_start()
-    return client
+def init_mqtt():
+    try:
+        # Menggunakan Callback API Version 2 agar kompatibel dengan paho-mqtt terbaru
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="StreamlitDashboard_SIC")
+        client.on_message = on_message
+        client.connect("broker.hivemq.com", 1883, 60)
+        client.subscribe("akuarimba/sensor/#")
+        client.loop_start()
+        return client
+    except Exception as e:
+        print("MQTT Connection Error:", e)
+        return None
 
-start_mqtt()
+init_mqtt()
 
 # --- TAMPILAN DASHBOARD ---
 st.title("🌊 AKUARIMBA: Smart Aquatic Monitoring System")
@@ -54,4 +62,4 @@ col4.metric("Cahaya", f"{st.session_state.light} Lux")
 col5.metric("Sonar / Jarak", f"{st.session_state.sonar} cm")
 
 st.markdown("---")
-st.info("💡 Dashboard ini diperbarui secara otomatis setiap 2 detik dari simulasi Wokwi.")
+st.info("💡 Dashboard terhubung ke broker.hivemq.com dan menyegarkan data setiap 2 detik.")
