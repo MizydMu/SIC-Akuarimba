@@ -1,55 +1,51 @@
 import streamlit as st
 import paho.mqtt.client as mqtt
-import queue
 from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="Akuarimba SIC Dashboard", page_icon="🐟", layout="wide")
 
-# Auto-refresh halaman setiap 1 detik agar antrean pesan langsung terproses di layar
-st_autorefresh(interval=1000, limit=None, key="frequent_refresh")
+# Auto-refresh halaman setiap 2 detik
+st_autorefresh(interval=2000, limit=None, key="auto_reload")
 
-# Gunakan Queue agar thread MQTT aman berkomunikasi dengan Streamlit
-if 'mqtt_queue' not in st.session_state:
-    st.session_state.mqtt_queue = queue.Queue()
-
+# Inisialisasi Session State
 for key in ['ph', 'temp', 'turbid', 'sonar', 'light']:
     if key not in st.session_state:
         st.session_state[key] = "Menunggu..."
 
-# Callback saat pesan MQTT masuk
-def on_message(client, userdata, msg):
-    try:
+# Fungsi untuk mengambil data sekunder atau koneksi langsung
+# Menggunakan cara non-blocking sederhana
+@st.cache_resource
+def get_mqtt_client():
+    def on_connect(client, userdata, flags, rc, properties=None):
+        client.subscribe("akuarimba/sensor/#")
+
+    def on_message(client, userdata, msg):
         payload = msg.payload.decode('utf-8')
         topic = msg.topic
-        st.session_state.mqtt_queue.put((topic, payload))
-    except Exception as e:
-        print("Error queue:", e)
+        if "ph" in topic:
+            st.session_state.ph = payload
+        elif "temp" in topic:
+            st.session_state.temp = payload
+        elif "turbid" in topic:
+            st.session_state.turbid = payload
+        elif "sonar" in topic:
+            st.session_state.sonar = payload
+        elif "light" in topic:
+            st.session_state.light = payload
 
-# Inisialisasi MQTT Client (Singleton)
-@st.cache_resource
-def init_mqtt():
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="StreamlitDashboard_Akuarimba")
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    client.on_connect = on_connect
     client.on_message = on_message
-    client.connect("broker.hivemq.com", 1883, 60)
-    client.subscribe("akuarimba/sensor/#")
-    client.loop_start()
+    
+    try:
+        client.connect("broker.hivemq.com", 1883, 60)
+        client.loop_start()
+    except Exception as e:
+        print("Connection failed:", e)
+        
     return client
 
-init_mqtt()
-
-# Proses pesan yang masuk dari antrean ke session_state secara aman
-while not st.session_state.mqtt_queue.empty():
-    topic, payload = st.session_state.mqtt_queue.get()
-    if "ph" in topic:
-        st.session_state.ph = payload
-    elif "temp" in topic:
-        st.session_state.temp = payload
-    elif "turbid" in topic:
-        st.session_state.turbid = payload
-    elif "sonar" in topic:
-        st.session_state.sonar = payload
-    elif "light" in topic:
-        st.session_state.light = payload
+get_mqtt_client()
 
 # --- TAMPILAN DASHBOARD ---
 st.title("🌊 AKUARIMBA: Smart Aquatic Monitoring System")
@@ -66,4 +62,4 @@ col4.metric("Cahaya", f"{st.session_state.light} Lux")
 col5.metric("Sonar / Jarak", f"{st.session_state.sonar} cm")
 
 st.markdown("---")
-st.info("💡 Terhubung ke broker publik. Data diperbarui secara real-time dari simulasi Wokwi.")
+st.info("💡 Halaman ini melakukan refresh otomatis setiap 2 detik untuk memperbarui data sensor.")
