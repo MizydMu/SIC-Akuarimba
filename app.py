@@ -1,63 +1,46 @@
 import streamlit as st
-import pandas as pd
-import plotly.express as px
 import paho.mqtt.client as mqtt
+import time
 
-# Konfigurasi Halaman Web
-st.set_page_config(
-    page_title="Akuarimba SIC Dashboard",
-    page_icon="🐟",
-    layout="wide"
-)
+st.set_page_config(page_title="Akuarimba SIC Dashboard", page_icon="🐟", layout="wide")
 
-# Inisialisasi Session State untuk menyimpan data sensor secara real-time
-if 'ph' not in st.session_state:
-    st.session_state.ph = "7.0"
-if 'temp' not in st.session_state:
-    st.session_state.temp = "27.0"
-if 'turbid' not in st.session_state:
-    st.session_state.turbid = "10.0"
-if 'sonar' not in st.session_state:
-    st.session_state.sonar = "25.0"
-if 'light' not in st.session_state:
-    st.session_state.light = "400"
+# Inisialisasi Session State
+for key in ['ph', 'temp', 'turbid', 'sonar', 'light']:
+    if key not in st.session_state:
+        st.session_state[key] = "Menunggu..."
 
-# Fungsi Callback saat pesan MQTT diterima
+# Callback MQTT saat pesan masuk
 def on_message(client, userdata, msg):
     payload = msg.payload.decode()
-    if msg.topic == "akuarimba/sensor/ph":
+    topic = msg.topic
+    if "ph" in topic:
         st.session_state.ph = payload
-    elif msg.topic == "akuarimba/sensor/temp":
+    elif "temp" in topic:
         st.session_state.temp = payload
-    elif msg.topic == "akuarimba/sensor/turbid":
+    elif "turbid" in topic:
         st.session_state.turbid = payload
-    elif msg.topic == "akuarimba/sensor/sonar":
+    elif "sonar" in topic:
         st.session_state.sonar = payload
-    elif msg.topic == "akuarimba/sensor/light":
+    elif "light" in topic:
         st.session_state.light = payload
 
-# Inisialisasi MQTT Client (dijalankan sekali menggunakan st.cache_resource)
+# Inisialisasi Koneksi MQTT (Singleton agar tidak terhubung ulang terus-menerus)
 @st.cache_resource
-def init_mqtt_client():
+def start_mqtt():
     client = mqtt.Client()
     client.on_message = on_message
-    try:
-        client.connect("broker.hivemq.com", 1883, 60)
-        client.subscribe("akuarimba/sensor/#")
-        client.loop_start()
-    except Exception as e:
-        print("Gagal koneksi MQTT:", e)
+    client.connect("broker.hivemq.com", 1883, 60)
+    client.subscribe("akuarimba/sensor/#")
+    client.loop_start()
     return client
 
-# Jalankan inisialisasi MQTT
-init_mqtt_client()
+start_mqtt()
 
 # --- TAMPILAN DASHBOARD ---
 st.title("🌊 AKUARIMBA: Smart Aquatic Monitoring System")
-st.markdown("Dashboard pemantauan kualitas air kolam secara *real-time* untuk Samsung Innovation Campus.")
+st.markdown("Samsung Innovation Campus - Real-Time IoT Dashboard")
 st.markdown("---")
 
-# Baris Metrik Utama
 st.subheader("📊 Status Sensor Terkini (Live MQTT)")
 col1, col2, col3, col4, col5 = st.columns(5)
 
@@ -68,9 +51,8 @@ col4.metric("Cahaya", f"{st.session_state.light} Lux")
 col5.metric("Sonar / Jarak", f"{st.session_state.sonar} cm")
 
 st.markdown("---")
+st.info("💡 Data diperbarui otomatis dari simulasi Wokwi melalui Broker MQTT publik.")
 
-# Panel Informasi & Tombol Refresh
-st.info("💡 **Petunjuk:** Ubah nilai sensor atau potensiometer pada simulasi Wokwi Anda, lalu klik tombol di bawah untuk melihat pembaruan data secara langsung.")
-
-if st.button("🔄 Segarkan Data Dashboard"):
+# Tombol manual refresh jika diperlukan
+if st.button("🔄 Perbarui Tampilan"):
     st.rerun()
