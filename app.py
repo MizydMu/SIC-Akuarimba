@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
-st.set_page_config(page_title="Akuarimba SIC Dashboard", page_icon="🐟", layout="wide")
+st.set_page_config(page_title="Aquarimba SIC Dashboard", page_icon="🐟", layout="wide")
 
 st_autorefresh(interval=2000, limit=None, key="emqx_refresh")
 
@@ -270,8 +270,8 @@ def make_chart(points, unit, color, sonar=False):
 # ==========================================================
 # TAMPILAN DASHBOARD
 # ==========================================================
-st.title("AKUARIMBA: Smart Aquatic Monitoring System")
-st.markdown("Samsung Innovation Campus - Real-Time IoT Dashboard")
+st.title("AQUARIMBA: Smart Aquatic Monitoring System")
+st.markdown("Aquaculture Quality & Underwater Automation with Real-Time IoT Monitoring for Behavioral Assessment")
 
 # --- Status darurat (paling atas) ---
 emergency_banner()
