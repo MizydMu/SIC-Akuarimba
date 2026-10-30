@@ -4,10 +4,8 @@ from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="Akuarimba SIC Dashboard", page_icon="🐟", layout="wide")
 
-# Auto-refresh halaman setiap 2 detik agar dashboard selalu terbarui
-st_autorefresh(interval=2000, limit=None, key="dashboard_refresh")
+st_autorefresh(interval=2000, limit=None, key="emqx_refresh")
 
-# Inisialisasi Session State
 for key in ['ph', 'temp', 'turbid', 'sonar', 'light']:
     if key not in st.session_state:
         st.session_state[key] = "Menunggu..."
@@ -32,17 +30,20 @@ def get_mqtt_client():
             elif "light" in topic:
                 st.session_state.light = payload
         except Exception as e:
-            print("Error parsing MQTT:", e)
+            print("Error:", e)
 
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    # Menggunakan WebSocket transport untuk menembus firewall Streamlit Cloud
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, transport="websockets")
     client.on_connect = on_connect
     client.on_message = on_message
     
     try:
-        client.connect("broker.hivemq.com", 1883, 60)
+        # Mengaktifkan TLS agar kompatibel dengan port WSS 8443
+        client.tls_set()
+        client.connect("broker.emqx.io", 8443, 60)
         client.loop_start()
     except Exception as e:
-        print("MQTT Connection failed:", e)
+        print("EMQX Connection failed:", e)
         
     return client
 
@@ -53,7 +54,7 @@ st.title("🌊 AKUARIMBA: Smart Aquatic Monitoring System")
 st.markdown("Samsung Innovation Campus - Real-Time IoT Dashboard")
 st.markdown("---")
 
-st.subheader("📊 Status Sensor Terkini (Live MQTT)")
+st.subheader("📊 Status Sensor Terkini (EMQX Broker)")
 col1, col2, col3, col4, col5 = st.columns(5)
 
 col1.metric("Kadar pH Air", f"{st.session_state.ph} pH")
@@ -63,4 +64,4 @@ col4.metric("Cahaya", f"{st.session_state.light} Lux")
 col5.metric("Sonar / Jarak", f"{st.session_state.sonar} cm")
 
 st.markdown("---")
-st.info("💡 Terhubung ke broker.hivemq.com. Data diperbarui secara real-time dari Wokwi.")
+st.info("💡 Terhubung ke broker.emqx.io via WebSocket Secure (WSS).")
