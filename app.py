@@ -1,3 +1,4 @@
+import uuid
 import streamlit as st
 import paho.mqtt.client as mqtt
 from streamlit_autorefresh import st_autorefresh
@@ -16,16 +17,19 @@ TOPIC_MAP = {
 
 @st.cache_resource
 def get_mqtt_client():
-    # Penyimpanan data bersama (aman dibaca/ditulis dari thread lain)
     data = {k: "Menunggu..." for k in TOPIC_MAP.values()}
     data["_status"] = "Menghubungkan..."
 
     def on_connect(client, userdata, flags, rc, properties=None):
         if rc == 0:
             data["_status"] = "Terhubung"
-            client.subscribe("akuarimba/sensor/#")
+            for topic in TOPIC_MAP:
+                client.subscribe(topic)
         else:
             data["_status"] = f"Gagal (rc={rc})"
+
+    def on_disconnect(client, userdata, flags, rc, properties=None):
+        data["_status"] = f"Terputus (rc={rc}), mencoba ulang..."
 
     def on_message(client, userdata, msg):
         key = TOPIC_MAP.get(msg.topic)
@@ -34,12 +38,14 @@ def get_mqtt_client():
 
     client = mqtt.Client(
         mqtt.CallbackAPIVersion.VERSION2,
-        client_id="akuarimba-dashboard-streamlit",
+        client_id=f"akuarimba-dash-{uuid.uuid4().hex[:10]}",
         transport="websockets",
     )
-    client.ws_set_options(path="/mqtt")   # path WebSocket EMQX
+    client.ws_set_options(path="/mqtt")
     client.tls_set()
+    client.reconnect_delay_set(min_delay=2, max_delay=30)
     client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
     client.on_message = on_message
     client.connect_async("broker.emqx.io", 8084, 60)
     client.loop_start()
@@ -47,7 +53,6 @@ def get_mqtt_client():
 
 data = get_mqtt_client()
 
-# --- TAMPILAN DASHBOARD ---
 st.title("🌊 AKUARIMBA: Smart Aquatic Monitoring System")
 st.markdown("Samsung Innovation Campus - Real-Time IoT Dashboard")
 st.markdown("---")
