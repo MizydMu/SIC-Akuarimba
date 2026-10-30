@@ -12,36 +12,39 @@ for key in ['ph', 'temp', 'turbid', 'sonar', 'light']:
     if key not in st.session_state:
         st.session_state[key] = "Menunggu..."
 
-# Fungsi untuk mengambil data sekunder atau koneksi langsung
-# Menggunakan cara non-blocking sederhana
 @st.cache_resource
 def get_mqtt_client():
     def on_connect(client, userdata, flags, rc, properties=None):
         client.subscribe("akuarimba/sensor/#")
 
     def on_message(client, userdata, msg):
-        payload = msg.payload.decode('utf-8')
-        topic = msg.topic
-        if "ph" in topic:
-            st.session_state.ph = payload
-        elif "temp" in topic:
-            st.session_state.temp = payload
-        elif "turbid" in topic:
-            st.session_state.turbid = payload
-        elif "sonar" in topic:
-            st.session_state.sonar = payload
-        elif "light" in topic:
-            st.session_state.light = payload
+        try:
+            payload = msg.payload.decode('utf-8')
+            topic = msg.topic
+            if "ph" in topic:
+                st.session_state.ph = payload
+            elif "temp" in topic:
+                st.session_state.temp = payload
+            elif "turbid" in topic:
+                st.session_state.turbid = payload
+            elif "sonar" in topic:
+                st.session_state.sonar = payload
+            elif "light" in topic:
+                st.session_state.light = payload
+        except Exception as e:
+            print("Error parse:", e)
 
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    # Menggunakan transport="websockets" agar tembus firewall Streamlit Cloud
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, transport="websockets")
     client.on_connect = on_connect
     client.on_message = on_message
     
     try:
-        client.connect("broker.hivemq.com", 1883, 60)
+        # Menggunakan broker EMQX dengan port WebSocket (8083)
+        client.connect("broker.emqx.io", 8083, 60)
         client.loop_start()
     except Exception as e:
-        print("Connection failed:", e)
+        print("WebSocket Connection failed:", e)
         
     return client
 
@@ -62,4 +65,4 @@ col4.metric("Cahaya", f"{st.session_state.light} Lux")
 col5.metric("Sonar / Jarak", f"{st.session_state.sonar} cm")
 
 st.markdown("---")
-st.info("💡 Halaman ini melakukan refresh otomatis setiap 2 detik untuk memperbarui data sensor.")
+st.info("💡 Terhubung via WebSocket ke broker.emqx.io. Data diperbarui secara real-time.")
