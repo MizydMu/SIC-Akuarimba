@@ -34,17 +34,18 @@ def get_mqtt_client():
         except Exception as e:
             print("Error parse:", e)
 
-    # Menggunakan transport="websockets" agar tembus firewall Streamlit Cloud
+    # Menggunakan websockets dengan versi API 2
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, transport="websockets")
     client.on_connect = on_connect
     client.on_message = on_message
     
     try:
-        # Menggunakan broker EMQX dengan port WebSocket (8083)
-        client.connect("broker.emqx.io", 8083, 60)
+        # Menggunakan port WSS (8443) agar lolos proteksi HTTPS Streamlit Cloud
+        client.tls_set() # Mengaktifkan sertifikat aman untuk WSS
+        client.connect("broker.emqx.io", 8443, 60)
         client.loop_start()
     except Exception as e:
-        print("WebSocket Connection failed:", e)
+        print("WSS Connection failed:", e)
         
     return client
 
@@ -65,4 +66,4 @@ col4.metric("Cahaya", f"{st.session_state.light} Lux")
 col5.metric("Sonar / Jarak", f"{st.session_state.sonar} cm")
 
 st.markdown("---")
-st.info("💡 Terhubung via WebSocket ke broker.emqx.io. Data diperbarui secara real-time.")
+st.info("💡 Terhubung via WSS yang aman ke broker.emqx.io.")
