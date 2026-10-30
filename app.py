@@ -1,15 +1,18 @@
 import streamlit as st
 import paho.mqtt.client as mqtt
-import time
+from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="Akuarimba SIC Dashboard", page_icon="🐟", layout="wide")
+
+# Auto-refresh halaman setiap 2 detik agar angka live langsung tampil
+st_autorefresh(interval=2000, limit=None, key="mqtt_refresh")
 
 # Inisialisasi Session State
 for key in ['ph', 'temp', 'turbid', 'sonar', 'light']:
     if key not in st.session_state:
         st.session_state[key] = "Menunggu..."
 
-# Callback MQTT saat pesan masuk
+# Callback MQTT saat pesan masuk dari Wokwi
 def on_message(client, userdata, msg):
     payload = msg.payload.decode()
     topic = msg.topic
@@ -24,7 +27,7 @@ def on_message(client, userdata, msg):
     elif "light" in topic:
         st.session_state.light = payload
 
-# Inisialisasi Koneksi MQTT (Singleton agar tidak terhubung ulang terus-menerus)
+# Inisialisasi Koneksi MQTT (Singleton)
 @st.cache_resource
 def start_mqtt():
     client = mqtt.Client()
@@ -51,8 +54,4 @@ col4.metric("Cahaya", f"{st.session_state.light} Lux")
 col5.metric("Sonar / Jarak", f"{st.session_state.sonar} cm")
 
 st.markdown("---")
-st.info("💡 Data diperbarui otomatis dari simulasi Wokwi melalui Broker MQTT publik.")
-
-# Tombol manual refresh jika diperlukan
-if st.button("🔄 Perbarui Tampilan"):
-    st.rerun()
+st.info("💡 Dashboard ini diperbarui secara otomatis setiap 2 detik dari simulasi Wokwi.")
