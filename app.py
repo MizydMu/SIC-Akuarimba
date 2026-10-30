@@ -17,18 +17,23 @@ st_autorefresh(interval=2000, limit=None, key="emqx_refresh")
 # ==========================================================
 BROKER = "broker.emqx.io"
 WSS_PORT = 8084
-PREFIX = "akuarimba/sensor/"
+SENSOR_PREFIX = "akuarimba/sensor/"
+ACTUATOR_PREFIX = "akuarimba/aktuator/"
+REASON_TOPIC = "akuarimba/status/alasan_alarm"
+
 MAX_POINTS = 300                      # 300 titik x 3 detik = sekitar 15 menit riwayat
+STALE_SECONDS = 60                    # tanpa data selama ini -> status darurat dianggap tidak diketahui
 WIB = timezone(timedelta(hours=7))    # semua waktu ditampilkan dalam WIB
 
 # Ambang batas pergerakan ikan (cm). Semakin dekat ke sensor, semakin anomali.
-# FISH_ANOMALY_CM sengaja sama dengan batas alarm di sketch.ino (distance < 6.0).
+# FISH_ANOMALY_CM harus sama dengan FISH_ANOMALY_CM di sketch.ino.
 FISH_ANOMALY_CM = 6.0     # di bawah ini  -> Anomali
 FISH_WARNING_CM = 15.0    # di bawah ini  -> Waspada, di atasnya Normal
 
 COLOR_OK = "#2e9e5b"
 COLOR_WARN = "#d99a00"
 COLOR_BAD = "#d64545"
+COLOR_ACTIVE = "#0984e3"
 COLOR_IDLE = "#8a8f98"
 
 # key, label, satuan, warna garis grafik
@@ -38,6 +43,14 @@ SENSORS = [
     ("turbid", "Kekeruhan", "NTU", "#b08968"),
     ("light", "Cahaya", "Lux", "#f0a500"),
     ("sonar", "Sonar / Jarak", "cm", "#0984e3"),
+]
+
+# key, nama, teks saat aktif, teks saat tidak aktif, warna saat aktif
+ACTUATORS = [
+    ("ph_up", "Katup pH Up (penambah pH)", "Terbuka", "Tertutup", COLOR_ACTIVE),
+    ("ph_down", "Katup pH Down (penurun pH)", "Terbuka", "Tertutup", COLOR_ACTIVE),
+    ("lampu", "Lampu buatan", "Menyala", "Mati", COLOR_WARN),
+    ("alarm", "Alarm darurat (LED dan buzzer)", "Aktif", "Tidak aktif", COLOR_BAD),
 ]
 
 
@@ -50,6 +63,8 @@ def get_state():
         "lock": threading.Lock(),
         "latest": {k: None for k, *_ in SENSORS},
         "history": {k: deque(maxlen=MAX_POINTS) for k, *_ in SENSORS},
+        "actuators": {k: None for k, *_ in ACTUATORS},
+        "reason": None,
         "connected": False,
         "status": "Menghubungkan...",
         "count": 0,
@@ -65,7 +80,11 @@ def get_state():
                 state["connected"] = False
                 state["status"] = f"Gagal (rc={rc})"
         if rc == 0:
-            client.subscribe(PREFIX + "#", qos=0)
+            client.subscribe([
+                (SENSOR_PREFIX + "#", 0),
+                (ACTUATOR_PREFIX + "#", 0),
+                (REASON_TOPIC, 0),
+            ])
 
     def on_disconnect(client, userdata, flags, rc, properties=None):
         with state["lock"]:
@@ -73,19 +92,30 @@ def get_state():
             state["status"] = f"Terputus (rc={rc}), mencoba ulang..."
 
     def on_message(client, userdata, msg):
-        if not msg.topic.startswith(PREFIX):
-            return
-        key = msg.topic[len(PREFIX):]
-        if key not in state["latest"]:
-            return
-        try:
-            value = float(msg.payload.decode("utf-8", errors="ignore").strip())
-        except ValueError:
-            return
+        topic = msg.topic
+        payload = msg.payload.decode("utf-8", errors="ignore").strip()
         now = datetime.now(WIB)
+
         with state["lock"]:
-            state["latest"][key] = value
-            state["history"][key].append((now, value))
+            if topic.startswith(SENSOR_PREFIX):
+                key = topic[len(SENSOR_PREFIX):]
+                if key not in state["latest"]:
+                    return
+                try:
+                    value = float(payload)
+                except ValueError:
+                    return
+                state["latest"][key] = value
+                state["history"][key].append((now, value))
+            elif topic.startswith(ACTUATOR_PREFIX):
+                key = topic[len(ACTUATOR_PREFIX):]
+                if key not in state["actuators"]:
+                    return
+                state["actuators"][key] = (payload == "1")
+            elif topic == REASON_TOPIC:
+                state["reason"] = payload
+            else:
+                return
             state["count"] += 1
             state["last_time"] = now
 
@@ -111,10 +141,16 @@ state = get_state()
 with state["lock"]:
     latest = dict(state["latest"])
     history = {k: list(v) for k, v in state["history"].items()}
+    actuators = dict(state["actuators"])
+    alarm_reason = state["reason"]
     connected = state["connected"]
     status_text = state["status"]
     msg_count = state["count"]
     last_time = state["last_time"]
+
+now_wib = datetime.now(WIB)
+data_age = (now_wib - last_time).total_seconds() if last_time else None
+data_fresh = data_age is not None and data_age <= STALE_SECONDS
 
 
 # ==========================================================
@@ -142,6 +178,37 @@ def fish_status(distance):
             "Ikan bergerak pada jarak aman dari sensor.", score)
 
 
+def emergency_banner():
+    alarm = actuators.get("alarm")
+    if alarm is None or not data_fresh:
+        st.markdown(
+            f'<div style="border:2px solid {COLOR_IDLE};background:{COLOR_IDLE}1f;'
+            f'border-radius:12px;padding:14px 20px;">'
+            f'<span style="font-size:22px;font-weight:700;color:{COLOR_IDLE};">Status darurat belum diketahui</span>'
+            f'<span style="opacity:0.8;margin-left:12px;">Belum ada data terbaru dari perangkat.</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+    elif alarm:
+        reason = alarm_reason if alarm_reason and alarm_reason != "Aman" else "Alarm pada perangkat aktif"
+        st.markdown(
+            f'<div style="background:{COLOR_BAD};color:#ffffff;border-radius:12px;padding:16px 20px;">'
+            f'<div style="font-size:28px;font-weight:700;">Kondisi darurat</div>'
+            f'<div style="font-size:17px;margin-top:4px;">Penyebab: {reason}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            f'<div style="border:2px solid {COLOR_OK};background:{COLOR_OK}1f;'
+            f'border-radius:12px;padding:14px 20px;">'
+            f'<span style="font-size:22px;font-weight:700;color:{COLOR_OK};">Kondisi aman</span>'
+            f'<span style="opacity:0.8;margin-left:12px;">Tidak ada alarm darurat yang aktif.</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+
 def status_card(emoji, title, detail, color):
     st.markdown(
         f'<div style="border:2px solid {color};background:{color}1f;border-radius:14px;'
@@ -152,6 +219,26 @@ def status_card(emoji, title, detail, color):
         f'</div>',
         unsafe_allow_html=True,
     )
+
+
+def actuator_rows():
+    rows = []
+    for key, name, on_text, off_text, on_color in ACTUATORS:
+        value = actuators.get(key)
+        if value is None:
+            text, color = "Menunggu data", COLOR_IDLE
+        elif value:
+            text, color = on_text, on_color
+        else:
+            text, color = off_text, COLOR_IDLE
+        rows.append(
+            f'<div style="display:flex;justify-content:space-between;align-items:center;'
+            f'padding:10px 4px;border-bottom:1px solid rgba(128,128,128,0.25);">'
+            f'<span>{name}</span>'
+            f'<span style="font-weight:700;color:{color};">&#9679; {text}</span>'
+            f'</div>'
+        )
+    st.markdown("".join(rows), unsafe_allow_html=True)
 
 
 def make_chart(points, unit, color, sonar=False):
@@ -171,10 +258,10 @@ def make_chart(points, unit, color, sonar=False):
         fig.add_hline(y=FISH_WARNING_CM, line_dash="dash", line_color=COLOR_WARN,
                       annotation_text="Waspada", annotation_position="top right")
     fig.update_layout(
-        height=240,
+        height=260,
         margin=dict(l=10, r=10, t=10, b=10),
         showlegend=False,
-        xaxis=dict(title="Waktu (WIB)", tickformat="%H:%M:%S", nticks=4),
+        xaxis=dict(title="Waktu (WIB)", tickformat="%H:%M:%S"),
         yaxis=dict(title=unit),
     )
     return fig
@@ -185,9 +272,13 @@ def make_chart(points, unit, color, sonar=False):
 # ==========================================================
 st.title("AKUARIMBA: Smart Aquatic Monitoring System")
 st.markdown("Samsung Innovation Campus - Real-Time IoT Dashboard")
+
+# --- Status darurat (paling atas) ---
+emergency_banner()
+
 st.markdown("---")
 
-# --- Baris atas: status koneksi dan status pergerakan ikan ---
+# --- Status koneksi dan status pergerakan ikan ---
 col_conn, col_fish = st.columns([1, 2])
 
 with col_conn:
@@ -196,9 +287,8 @@ with col_conn:
         status_card("😊", "Terhubung", f"{BROKER} (WSS)", COLOR_OK)
     else:
         status_card("☹️", "Belum terhubung", status_text, COLOR_BAD)
-    if last_time is not None:
-        ago = int((datetime.now(WIB) - last_time).total_seconds())
-        st.caption(f"Pesan diterima: {msg_count} | Data terakhir {ago} detik lalu")
+    if data_age is not None:
+        st.caption(f"Pesan diterima: {msg_count} | Data terakhir {int(data_age)} detik lalu")
     else:
         st.caption(f"Pesan diterima: {msg_count} | Belum ada data masuk")
 
@@ -226,20 +316,26 @@ with col_fish:
 
 st.markdown("---")
 
-# --- Data sensor: satu kolom per data, lengkap dengan grafiknya ---
-st.subheader("Data sensor terkini")
-cols = st.columns(len(SENSORS))
+# --- Status aktuator ---
+st.subheader("Status aktuator")
+with st.container(border=True):
+    actuator_rows()
 
-for col, (key, name, unit, line_color) in zip(cols, SENSORS):
-    with col:
-        with st.container(border=True):
-            value = latest[key]
-            st.metric(name, f"{value:.1f} {unit}" if value is not None else "Menunggu...")
-            points = history[key]
-            if points:
-                show_chart(make_chart(points, unit, line_color, sonar=(key == "sonar")),
-                           key=f"chart_{key}")
-            else:
-                st.caption("Grafik akan muncul setelah data pertama diterima.")
+st.markdown("---")
+
+# --- Data sensor: satu kotak per data, disusun ke bawah ---
+st.subheader("Data sensor")
+
+for key, name, unit, line_color in SENSORS:
+    with st.container(border=True):
+        value = latest[key]
+        st.metric(name, f"{value:.1f} {unit}" if value is not None else "Menunggu...")
+        points = history[key]
+        if points:
+            show_chart(make_chart(points, unit, line_color, sonar=(key == "sonar")),
+                       key=f"chart_{key}")
+            st.caption(f"Diperbarui {points[-1][0]:%H:%M:%S} WIB")
+        else:
+            st.caption("Grafik akan muncul setelah data pertama diterima.")
 
 st.caption(f"Data diterima dari {BROKER} lewat WebSocket Secure. Grafik menyimpan sekitar 15 menit terakhir.")
